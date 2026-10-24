@@ -19,8 +19,8 @@ source.include_exts = py,png,jpg,kv,atlas,json
 version = 1.0.0
 
 # (list) Application requirements
-# Pure python / standard mobile recipes supported by python-for-android
-requirements = python3,kivy,requests,pandas,numpy,certifi,urllib3,charset-normalizer,idna,yfinance
+# Pure Python & standard Kivy recipes for 100% reliable Android compilation
+requirements = python3,kivy,requests,certifi,urllib3,charset-normalizer,idna
 
 # (str) Supported orientation (one of landscape, sensorLandscape, portrait or all)
 orientation = portrait
@@ -31,16 +31,16 @@ fullscreen = 0
 # (list) Permissions
 android.permissions = INTERNET,ACCESS_NETWORK_STATE
 
-# (int) Target Android API, should be as high as possible.
+# (int) Target Android API
 android.api = 33
 
-# (int) Minimum API your APK / AAB will support.
+# (int) Minimum API your APK will support
 android.minapi = 21
 
-# (list) The Android architectures to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
+# (list) The Android architectures to build for
 android.archs = arm64-v8a, armeabi-v7a
 
-# (bool) If True, then automatically accept SDK license
+# (bool) Automatically accept SDK license
 android.accept_sdk_license = True
 
 # (str) Android entry point
@@ -51,5 +51,5 @@ android.entrypoint = org.kivy.android.PythonActivity
 # (int) Log level (0 = error only, 1 = info, 2 = debug with command output)
 log_level = 2
 
-# (int) Display warning if buildozer is run as root (0 = False, 1 = True)
+# (int) Display warning if buildozer is run as root
 warn_on_root = 1

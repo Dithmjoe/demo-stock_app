@@ -1,5 +1,6 @@
 """
 Core prediction, market data, and AI engine for Intraday Stock Predictor Mobile.
+Designed to be lightweight, pure-Python compatible, and mobile-first.
 Compatible with Android (via Kivy/Buildozer) and Desktop.
 """
 
@@ -7,12 +8,22 @@ import os
 import sys
 import time
 import json
+import random
 import datetime
-import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
-import numpy as np
-import pandas as pd
 import requests
+
+# Optional imports for desktop acceleration
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTS & ASSETS
@@ -72,12 +83,14 @@ RSI_OVERBOUGHT = 65
 
 HF_FINBERT_URL = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
 
+def clamp(val, low, high):
+    return max(low, min(high, val))
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STORAGE HELPERS (CROSS-PLATFORM)
 # ─────────────────────────────────────────────────────────────────────────────
 def get_data_dir() -> str:
     """Return appropriate storage directory for current platform."""
-    # Check if running under Kivy on Android
     try:
         from kivy.app import App
         app = App.get_running_app()
@@ -169,36 +182,71 @@ def get_market_status() -> dict:
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TECHNICAL ANALYSIS (PURE NUMPY/PANDAS)
+# TECHNICAL ANALYSIS (PURE PYTHON / NUMPY ACCELERATED)
 # ─────────────────────────────────────────────────────────────────────────────
-def fetch_ohlcv(ticker: str, period: str = "5d", interval: str = "1d") -> pd.DataFrame:
+def fetch_ohlcv(ticker: str, period: str = "5d", interval: str = "1d") -> dict:
     """
-    Download OHLCV dataframe using yfinance with safety fallbacks.
+    Download OHLCV data using direct Yahoo Finance chart API.
+    Zero C-compilation dependencies, fast, lightweight.
+    Returns dict: {'closes': [...], 'highs': [...], 'lows': [...], 'volumes': [...]}
     """
-    import yfinance as yf
-    try:
-        df = yf.download(
-            ticker,
-            period=period,
-            interval=interval,
-            auto_adjust=True,
-            progress=False,
-            threads=False,
-            timeout=10,
-        )
-        if df.empty or len(df) < 3:
-            return pd.DataFrame()
-        df.dropna(inplace=True)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        return df
-    except Exception:
-        return pd.DataFrame()
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=10d&interval=1d"
 
-def compute_technical_indicators(df: pd.DataFrame) -> dict:
+    try:
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code == 200:
+            data = resp.json()
+            result = data.get("chart", {}).get("result", [])
+            if result:
+                quote = result[0].get("indicators", {}).get("quote", [{}])[0]
+                raw_closes = quote.get("close", [])
+                raw_highs = quote.get("high", [])
+                raw_lows = quote.get("low", [])
+                raw_vols = quote.get("volume", [])
+
+                # Filter None values
+                clean_c, clean_h, clean_l, clean_v = [], [], [], []
+                for c, h, l, v in zip(raw_closes, raw_highs, raw_lows, raw_vols):
+                    if c is not None and h is not None and l is not None and v is not None:
+                        clean_c.append(float(c))
+                        clean_h.append(float(h))
+                        clean_l.append(float(l))
+                        clean_v.append(float(v))
+
+                if len(clean_c) >= 3:
+                    return {
+                        "closes": clean_c,
+                        "highs": clean_h,
+                        "lows": clean_l,
+                        "volumes": clean_v
+                    }
+    except Exception:
+        pass
+
+    # Fallback to yfinance if available
+    try:
+        import yfinance as yf
+        df = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False)
+        if not df.empty and len(df) >= 3:
+            df.dropna(inplace=True)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            return {
+                "closes": df["Close"].astype(float).tolist(),
+                "highs": df["High"].astype(float).tolist(),
+                "lows": df["Low"].astype(float).tolist(),
+                "volumes": df["Volume"].astype(float).tolist()
+            }
+    except Exception:
+        pass
+
+    return {}
+
+def compute_technical_indicators(data: dict) -> dict:
     """
-    Compute RSI (14) and VWAP using pure NumPy/Pandas.
-    Avoids compilation dependencies on Android.
+    Compute RSI (14) and VWAP using pure Python math.
+    Zero C-compilation dependencies, guaranteed to run on any mobile CPU.
     """
     res = {
         "rsi": None,
@@ -212,33 +260,33 @@ def compute_technical_indicators(df: pd.DataFrame) -> dict:
         "prices": [],
     }
 
-    if df.empty or len(df) < 2:
+    closes = data.get("closes", [])
+    highs = data.get("highs", [])
+    lows = data.get("lows", [])
+    volumes = data.get("volumes", [])
+
+    if len(closes) < 2:
         res["error"] = "Insufficient data"
         return res
 
     try:
-        closes = df["Close"].astype(float)
-        highs = df["High"].astype(float)
-        lows = df["Low"].astype(float)
-        volumes = df["Volume"].astype(float)
-
-        last_close = float(closes.iloc[-1])
-        prev_close = float(closes.iloc[-2]) if len(closes) > 1 else last_close
+        last_close = closes[-1]
+        prev_close = closes[-2]
         change_pct = round(((last_close - prev_close) / prev_close) * 100, 2)
 
         res["close"] = round(last_close, 2)
         res["change_pct"] = change_pct
-        res["prices"] = [round(float(p), 2) for p in closes.tail(10).tolist()]
+        res["prices"] = [round(p, 2) for p in closes[-10:]]
 
-        # ── RSI 14 (Wilder's Smoothing or Standard SMA for robustness) ──
-        delta = closes.diff()
-        gain = delta.clip(lower=0)
-        loss = -delta.clip(upper=0)
+        # ── RSI 14 (Pure Python) ──
+        changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+        gains = [max(c, 0.0) for c in changes]
+        losses = [max(-c, 0.0) for c in changes]
 
-        window = min(14, len(closes) - 1)
+        window = min(14, len(gains))
         if window > 0:
-            avg_gain = gain.rolling(window=window, min_periods=1).mean().iloc[-1]
-            avg_loss = loss.rolling(window=window, min_periods=1).mean().iloc[-1]
+            avg_gain = sum(gains[-window:]) / window
+            avg_loss = sum(losses[-window:]) / window
 
             if avg_loss == 0:
                 rsi_val = 100.0
@@ -248,7 +296,7 @@ def compute_technical_indicators(df: pd.DataFrame) -> dict:
         else:
             rsi_val = 50.0
 
-        res["rsi"] = round(float(rsi_val), 1)
+        res["rsi"] = round(rsi_val, 1)
 
         if rsi_val < RSI_OVERSOLD:
             res["rsi_signal"] = 1     # Oversold -> Bounce UP
@@ -257,10 +305,11 @@ def compute_technical_indicators(df: pd.DataFrame) -> dict:
         else:
             res["rsi_signal"] = 0
 
-        # ── VWAP ──
-        typical_price = (highs + lows + closes) / 3.0
-        vwap_series = (typical_price * volumes).cumsum() / (volumes.cumsum() + 1e-9)
-        last_vwap = float(vwap_series.iloc[-1])
+        # ── VWAP (Pure Python) ──
+        tp = [(h + l + c) / 3.0 for h, l, c in zip(highs, lows, closes)]
+        total_tp_vol = sum(t * v for t, v in zip(tp, volumes))
+        total_vol = sum(volumes)
+        last_vwap = (total_tp_vol / total_vol) if total_vol > 0 else last_close
         res["vwap"] = round(last_vwap, 2)
 
         if last_close > last_vwap:
@@ -281,15 +330,15 @@ def compute_technical_indicators(df: pd.DataFrame) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 def fetch_news_headlines(ticker: str, company_name: str = "", max_items: int = 5) -> list[str]:
     """
-    Fetch live news headlines from Google News RSS for the Indian stock,
-    with yfinance news fallback. 100% free with no API key needed.
+    Fetch live news headlines from Google News RSS for the Indian stock.
+    100% free with zero API key needed.
     """
     headlines = []
     clean_name = company_name if company_name else ticker.replace(".NS", "")
     query = f"{clean_name} stock share price NSE"
     url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
 
-    # 1. Try Google News RSS
+    # 1. Google News RSS
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 10; K) Mobile Safari/537.36"}
         resp = requests.get(url, headers=headers, timeout=6)
@@ -304,7 +353,7 @@ def fetch_news_headlines(ticker: str, company_name: str = "", max_items: int = 5
     except Exception:
         pass
 
-    # 2. Fallback to yfinance news if RSS returned < 2 items
+    # 2. Fallback to Yahoo news if RSS returned < 2 items
     if len(headlines) < 2:
         try:
             import yfinance as yf
@@ -389,7 +438,6 @@ def query_huggingface_finbert(headlines: list[str], hf_token: str) -> dict | Non
         "Content-Type": "application/json",
     }
 
-    # FinBERT classifies up to 512 tokens. Send top 3-4 headlines combined
     prompt_text = " . ".join(headlines[:4])
     payload = {"inputs": prompt_text}
 
@@ -397,7 +445,6 @@ def query_huggingface_finbert(headlines: list[str], hf_token: str) -> dict | Non
         resp = requests.post(HF_FINBERT_URL, headers=headers, json=payload, timeout=8)
         if resp.status_code == 200:
             data = resp.json()
-            # HF outputs: [[{'label': 'positive', 'score': 0.8}, ...]] or [{'label': ...}]
             scores_list = data[0] if isinstance(data, list) and isinstance(data[0], list) else data
             score_map = {item["label"].lower(): item["score"] for item in scores_list if "label" in item}
 
@@ -460,19 +507,20 @@ def simulate_rl_adjustment(rl_state: dict, accuracy_log: dict) -> dict:
     if len(daily) >= 2:
         recent_trend = daily[-1]["accuracy"] - daily[-2]["accuracy"]
         dominant = "tech" if rl_state["tech_weight"] >= rl_state["news_weight"] else "news"
-        delta = 0.02 * np.sign(recent_trend)
+        trend_sign = 1.0 if recent_trend > 0 else (-1.0 if recent_trend < 0 else 0.0)
+        delta = 0.02 * trend_sign
 
         if dominant == "tech":
-            new_state["tech_weight"] = round(np.clip(rl_state["tech_weight"] + delta, 0.3, 0.8), 3)
+            new_state["tech_weight"] = round(clamp(rl_state["tech_weight"] + delta, 0.3, 0.8), 3)
         else:
-            new_state["news_weight"] = round(np.clip(rl_state["news_weight"] + delta, 0.2, 0.7), 3)
+            new_state["news_weight"] = round(clamp(rl_state["news_weight"] + delta, 0.2, 0.7), 3)
 
         total = new_state["tech_weight"] + new_state["news_weight"]
         new_state["tech_weight"] = round(new_state["tech_weight"] / total, 3)
         new_state["news_weight"] = round(new_state["news_weight"] / total, 3)
     else:
-        delta = float(np.random.choice([-0.01, 0.0, 0.01]))
-        new_state["tech_weight"] = round(np.clip(rl_state["tech_weight"] + delta, 0.3, 0.8), 3)
+        delta = float(random.choice([-0.01, 0.0, 0.01]))
+        new_state["tech_weight"] = round(clamp(rl_state["tech_weight"] + delta, 0.3, 0.8), 3)
         new_state["news_weight"] = round(1.0 - new_state["tech_weight"], 3)
 
     new_state["iterations"] = rl_state.get("iterations", 0) + 1
@@ -480,8 +528,8 @@ def simulate_rl_adjustment(rl_state: dict, accuracy_log: dict) -> dict:
 
 def generate_accuracy_point(iteration: int) -> dict:
     base = min(0.85, 0.55 + iteration * 0.006)
-    noise = float(np.random.normal(0, 0.03))
-    accuracy = round(float(np.clip(base + noise, 0.48, 0.92)), 4)
+    noise = float(random.gauss(0, 0.03))
+    accuracy = round(float(clamp(base + noise, 0.48, 0.92)), 4)
     return {
         "date": datetime.date.today().isoformat(),
         "accuracy": accuracy,
@@ -510,15 +558,16 @@ def analyze_stock(ticker: str, company_name: str = "", hf_token: str = "",
         "direction": "NEUTRAL",
         "confidence": 50.0,
         "error": None,
+        "prices": [],
     }
 
     # 1. OHLCV & Tech analysis
-    df = fetch_ohlcv(ticker)
-    if df.empty:
+    data = fetch_ohlcv(ticker)
+    if not data:
         res["error"] = "Data unavailable"
         return res
 
-    tech = compute_technical_indicators(df)
+    tech = compute_technical_indicators(data)
     if tech["error"]:
         res["error"] = tech["error"]
         return res

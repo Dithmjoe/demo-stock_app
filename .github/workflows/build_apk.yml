@@ -7,38 +7,63 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pin to ubuntu-24.04 for stable package availability and reproducibility
+    runs-on: ubuntu-24.04
 
     steps:
+      # ── 1. Checkout code ──
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get Date for Cache
-        id: get-date
-        run: echo "date=$(/bin/date -u "+%Y%m%d")" >> $GITHUB_OUTPUT
-        shell: bash
+      # ── 2. Python 3.10 (matches our development environment) ──
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-      # Cache the heavy global buildozer downloads (Android SDK, NDK, Ant)
+      # ── 3. Temurin Java 17 (no PPA, no apt issues, works on all Ubuntu) ──
+      - name: Set up Java 17 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # ── 4. Cache the heavy Android SDK / NDK downloads ──
       - name: Cache Buildozer global directory
         uses: actions/cache@v4
         with:
-          path: .buildozer_global
-          key: buildozer-global-${{ runner.os }}-${{ steps.get-date.outputs.date }}-${{ hashFiles('buildozer.spec') }}
+          path: ~/.buildozer
+          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-global-${{ runner.os }}-${{ steps.get-date.outputs.date }}-
-            buildozer-global-${{ runner.os }}-
+            buildozer-${{ runner.os }}-
 
-      # Use official containerized Buildozer action (no apt-get failures or toolchain conflicts)
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
-        with:
-          command: buildozer android debug
-          buildozer_version: stable
+      # ── 5. Install ONLY what apt-get can reliably provide on Ubuntu 24.04 ──
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            git zip unzip \
+            build-essential autoconf libtool automake pkg-config cmake \
+            libffi-dev libssl-dev zlib1g-dev \
+            libsqlite3-dev sqlite3 \
+            libltdl-dev
 
-      - name: Upload APK Artifact
+      # ── 6. Install Buildozer & Cython ──
+      - name: Install Buildozer and Cython
+        run: |
+          pip install --upgrade pip
+          pip install cython==0.29.36
+          pip install buildozer
+
+      # ── 7. Build the Android debug APK ──
+      - name: Build Android APK
+        run: |
+          buildozer -v android debug 2>&1
+
+      # ── 8. Upload APK as downloadable artifact ──
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: StockPredictor-Android-APK
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
           retention-days: 14

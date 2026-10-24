@@ -1,0 +1,38 @@
+{
+  "daily": [
+    {
+      "date": "2026-10-23",
+      "accuracy": 0.5067,
+      "iteration": 1
+    },
+    {
+      "date": "2026-10-23",
+      "accuracy": 0.5354,
+      "iteration": 2
+    }
+  ],
+  "weekly": [
+    {
+      "date": "2026-10-23",
+      "accuracy": 0.5067,
+      "iteration": 1
+    },
+    {
+      "date": "2026-10-23",
+      "accuracy": 0.5354,
+      "iteration": 2
+    }
+  ],
+  "monthly": [
+    {
+      "date": "2026-10-23",
+      "accuracy": 0.5067,
+      "iteration": 1
+    },
+    {
+      "date": "2026-10-23",
+      "accuracy": 0.5354,
+      "iteration": 2
+    }
+  ]
+}

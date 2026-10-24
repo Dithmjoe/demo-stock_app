@@ -33,11 +33,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-v2-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-${{ runner.os }}-
+            buildozer-v2-${{ runner.os }}-
 
-      # ── 5. Install ONLY what apt-get can reliably provide on Ubuntu 24.04 ──
+      # ── 5. Install system dependencies (including SDL2 & Mesa for Kivy) ──
       - name: Install system dependencies
         run: |
           sudo apt-get update -y
@@ -46,7 +46,9 @@ jobs:
             build-essential autoconf libtool automake pkg-config cmake \
             libffi-dev libssl-dev zlib1g-dev \
             libsqlite3-dev sqlite3 \
-            libltdl-dev
+            libltdl-dev \
+            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+            libgl1-mesa-dev libgles2-mesa-dev
 
       # ── 6. Install Buildozer & Cython ──
       - name: Install Buildozer and Cython
@@ -58,7 +60,7 @@ jobs:
       # ── 7. Build the Android debug APK ──
       - name: Build Android APK
         run: |
-          buildozer -v android debug 2>&1
+          buildozer -v android debug
 
       # ── 8. Upload APK as downloadable artifact ──
       - name: Upload APK

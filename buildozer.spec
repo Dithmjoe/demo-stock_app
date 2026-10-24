@@ -37,8 +37,8 @@ android.api = 33
 # (int) Minimum API your APK will support
 android.minapi = 21
 
-# (list) The Android architectures to build for
-android.archs = arm64-v8a, armeabi-v7a
+# (list) The Android architectures to build for (arm64-v8a covers virtually all modern phones)
+android.archs = arm64-v8a
 
 # (bool) Automatically accept SDK license
 android.accept_sdk_license = True
